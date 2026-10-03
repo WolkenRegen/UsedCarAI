@@ -1,0 +1,29 @@
+{
+  "market": "Thailand",
+  "currency": "THB",
+  "odometer_unit": "km",
+  "source_name": "One2car Thailand listing snapshot (public research repository)",
+  "source_url": "https://github.com/krissanapipukmutt/USECAR_PREDICT_PRICE/blob/b03cf4086f120128a0e13a8418db9d836c129df0/ONE2CAR/one2car_raw_20260822_144626.csv",
+  "download_url": "https://raw.githubusercontent.com/krissanapipukmutt/USECAR_PREDICT_PRICE/b03cf4086f120128a0e13a8418db9d836c129df0/ONE2CAR/one2car_raw_20260822_144626.csv",
+  "source_commit": "b03cf4086f120128a0e13a8418db9d836c129df0",
+  "sha256": "ca74a0fccdaa25ad52ddca9a3f4105c917c9c72fbb877289b4f84f1d5c82f3d1",
+  "rows": 34848,
+  "scraped_at_as_recorded": "2026-08-22 13:56:04",
+  "downloaded_at_utc": "2026-09-21T04:06:47.003104+00:00",
+  "price_basis": "Asking prices in THB, preserved from raw_price/price; no currency conversion or synthetic rows.",
+  "mileage_basis": "Source mileage in km. Some values are source-normalized midpoints of listing mileage ranges, not independently verified exact odometer readings.",
+  "verification": {
+    "listing_id": 19166191,
+    "url": "https://www.one2car.com/en/for-sale/toyota-fortuner-leader-g-bangkok-metropolitan-kanchanaphisek/19166191",
+    "price_thb": 1059000,
+    "website_mileage": "25 - 30K km",
+    "source_mileage_km": 27500,
+    "checked_on": "2026-09-21"
+  },
+  "limitations": [
+    "Third-party historical snapshot; not a live price feed.",
+    "Listing claims were not independently inspected; spot-check does not verify every vehicle.",
+    "Geographic distribution is dominated by Bangkok.",
+    "Source prices of 1/100 THB are excluded by the documented price > 1000 THB filter."
+  ]
+}

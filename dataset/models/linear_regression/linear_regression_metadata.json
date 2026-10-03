@@ -1,0 +1,41 @@
+{
+  "model": "LinearRegression",
+  "target": "price",
+  "currency": "THB",
+  "dataset": "One2Car Thailand",
+  "features": [
+    "brand",
+    "model",
+    "sub_model",
+    "fuel_type",
+    "transmission",
+    "body_type",
+    "color",
+    "province",
+    "location",
+    "seller_type",
+    "model_year",
+    "mileage",
+    "engine_size",
+    "number_of_seats",
+    "vehicle_age",
+    "vehicle_age_sq",
+    "mileage_log1p",
+    "mileage_per_year"
+  ],
+  "validation_metrics": {
+    "MAE_THB": 479653.5235025078,
+    "RMSE_THB": 1000175.8636169359,
+    "R2": 0.2995956649386713,
+    "sMAPE_percent": 73.75556513430571,
+    "MedianAE_THB": 312444.9082939923
+  },
+  "test_metrics": {
+    "MAE_THB": 495754.05593169294,
+    "RMSE_THB": 1134895.256600254,
+    "R2": 0.3069749852644956,
+    "sMAPE_percent": 74.07389570922467,
+    "MedianAE_THB": 313854.73949992657
+  },
+  "training_seconds": 0.2809760570526123
+}

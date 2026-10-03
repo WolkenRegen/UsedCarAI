@@ -1,0 +1,7 @@
+numpy==2.5.3
+pandas==2.3.3
+scikit-learn==1.6.1
+joblib==1.6.0
+gradio==6.29.1
+requests==2.34.2
+ipykernel==7.3.0

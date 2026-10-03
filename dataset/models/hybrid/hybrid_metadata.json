@@ -1,0 +1,20 @@
+{
+  "model": "Hybrid",
+  "ml_component": "Random Forest",
+  "comparable_component": "Train-only Comparable Market Reference",
+  "ml_weight": 0.5,
+  "comparable_weight": 0.5,
+  "min_comparables": 3,
+  "max_comparables": 20,
+  "year_window": 5,
+  "mileage_window": 100000,
+  "test_metrics": {
+    "MAE_THB": 177138.71063335854,
+    "RMSE_THB": 1050110.452272862,
+    "R2": 0.40665496643725807,
+    "sMAPE_percent": 16.497935871945383,
+    "MedianAE_THB": 44896.03419839556
+  },
+  "comparable_coverage_percent": 93.85939741750359,
+  "note": "Comparable reference is built from training data only to avoid target leakage."
+}

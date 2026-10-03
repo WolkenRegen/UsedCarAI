@@ -1,0 +1,548 @@
+"""
+UsedCarAI - app/utils.py
+
+Shared utility functions for the UsedCarAI prediction application.
+
+Project assumptions
+-------------------
+- Dataset root: DATASET_DIR, or ../dataset relative to this file
+- Target: listing price in THB
+- Random Forest model: models/random_forest/random_forest_pipeline.joblib
+- Linear Regression model: models/linear_regression/linear_regression_pipeline.joblib
+- Hybrid comparable reference: models/hybrid/market_reference_train_only.csv
+
+Hybrid rule follows Step 4:
+- 50% Random Forest + 50% comparable market reference
+- fallback to Random Forest when fewer than 3 usable comparables exist
+"""
+
+from pathlib import Path
+import json
+import os
+import numpy as np
+import pandas as pd
+import joblib
+
+
+DEFAULT_PROJECT_ROOT = Path(
+    os.environ.get("DATASET_DIR", Path(__file__).resolve().parents[1] / "dataset")
+).expanduser().resolve()
+
+FEATURES = [
+    "brand", "model", "sub_model",
+    "fuel_type", "transmission", "body_type",
+    "color", "province", "location", "seller_type",
+    "model_year", "mileage", "engine_size", "number_of_seats",
+    "vehicle_age", "vehicle_age_sq", "mileage_log1p", "mileage_per_year",
+]
+
+ML_WEIGHT = 0.50
+COMP_WEIGHT = 0.50
+MIN_COMPS = 3
+MAX_COMPS = 20
+YEAR_WINDOW = 5
+MILEAGE_WINDOW = 100_000
+
+W_YEAR = 0.30
+W_MILEAGE = 0.30
+W_ENGINE = 0.15
+W_FUEL = 0.10
+W_TRANS = 0.10
+W_BODY = 0.05
+
+
+def _require(path: Path) -> Path:
+    if not path.exists():
+        raise FileNotFoundError(f"Required file not found: {path}")
+    return path
+
+
+def load_project(project_root=DEFAULT_PROJECT_ROOT):
+    """Load models and train-only comparables; use training rows for UI choices."""
+    root = Path(project_root)
+
+    # The exported training split already contains the cleaned feature columns.
+    # Use it for dropdowns when the full cleaned dataset was not exported.
+    cleaned_path = root / "data/cleaned/one2car_cleaned.csv"
+    if not cleaned_path.is_file():
+        cleaned_path = root / "data/processed/train.csv"
+
+    paths = {
+        "rf_path": root / "models/random_forest/random_forest_pipeline.joblib",
+        "lr_path": root / "models/linear_regression/linear_regression_pipeline.joblib",
+        "market_path": root / "models/hybrid/market_reference_train_only.csv",
+        "cleaned_path": cleaned_path,
+    }
+    missing = [str(path) for path in paths.values() if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Missing artifacts required by this version of UsedCarAI:\n- "
+            + "\n- ".join(missing)
+            + "\nCopy the models/ folder and either data/cleaned/one2car_cleaned.csv "
+              "or data/processed/train.csv from the same project into the dataset directory."
+        )
+    rf_path = paths["rf_path"]
+    lr_path = paths["lr_path"]
+    market_path = paths["market_path"]
+    cleaned_path = paths["cleaned_path"]
+
+    rf_model = joblib.load(rf_path)
+    lr_model = joblib.load(lr_path)
+    market = pd.read_csv(market_path)
+    cleaned = pd.read_csv(cleaned_path)
+    missing_features = sorted(set(FEATURES) - set(cleaned.columns))
+    if missing_features:
+        raise ValueError(f"{cleaned_path} is missing feature columns: {missing_features}")
+
+    summary_path = root / "results/metrics/final_project_summary.json"
+    summary = {}
+    if summary_path.exists():
+        with open(summary_path, "r", encoding="utf-8") as f:
+            summary = json.load(f)
+
+    return {
+        "root": root,
+        "rf_model": rf_model,
+        "lr_model": lr_model,
+        "market": market,
+        "cleaned": cleaned,
+        "choices_path": cleaned_path,
+        "summary": summary,
+    }
+
+
+def clean_text(value):
+    """Normalize an optional categorical value without inventing a category."""
+    if value is None:
+        return np.nan
+    if isinstance(value, float) and np.isnan(value):
+        return np.nan
+    text = str(value).strip()
+    return text if text else np.nan
+
+
+def safe_float(value, default=np.nan):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def prepare_input(
+    brand,
+    model,
+    sub_model,
+    model_year,
+    mileage,
+    fuel_type,
+    transmission,
+    engine_size,
+    body_type,
+    color,
+    province,
+    location,
+    seller_type,
+    number_of_seats,
+    reference_year=None,
+):
+    """Create the exact feature row expected by RF/LR pipelines."""
+    model_year = safe_float(model_year)
+    mileage = safe_float(mileage)
+    engine_size = safe_float(engine_size)
+    number_of_seats = safe_float(number_of_seats)
+
+    if np.isnan(model_year):
+        raise ValueError("model_year is required")
+    if np.isnan(mileage):
+        raise ValueError("mileage is required")
+    if mileage < 0:
+        raise ValueError("mileage must be >= 0")
+
+    # Step 1 dataset was collected in 2026; use 2026 unless explicitly overridden.
+    if reference_year is None:
+        reference_year = 2026
+
+    vehicle_age = max(0.0, float(reference_year) - model_year)
+    mileage_log1p = np.log1p(max(mileage, 0.0))
+    mileage_per_year = mileage / max(vehicle_age, 1.0)
+
+    row = {
+        "brand": clean_text(brand),
+        "model": clean_text(model),
+        "sub_model": clean_text(sub_model),
+        "fuel_type": clean_text(fuel_type),
+        "transmission": clean_text(transmission),
+        "body_type": clean_text(body_type),
+        "color": clean_text(color),
+        "province": clean_text(province),
+        "location": clean_text(location),
+        "seller_type": clean_text(seller_type),
+        "model_year": model_year,
+        "mileage": mileage,
+        "engine_size": engine_size,
+        "number_of_seats": number_of_seats,
+        "vehicle_age": vehicle_age,
+        "vehicle_age_sq": vehicle_age ** 2,
+        "mileage_log1p": mileage_log1p,
+        "mileage_per_year": mileage_per_year,
+    }
+
+    return pd.DataFrame([row], columns=FEATURES)
+
+
+def _same_text(series, value):
+    if pd.isna(value):
+        return np.full(len(series), 0.5, dtype=float)
+    return (series.fillna("").astype(str).to_numpy() == str(value)).astype(float)
+
+
+def comparable_score(query, candidates):
+    q_year = safe_float(query.get("model_year"))
+    q_mileage = safe_float(query.get("mileage"))
+    q_engine = safe_float(query.get("engine_size"))
+
+    years = pd.to_numeric(candidates["model_year"], errors="coerce").to_numpy(dtype=float)
+    mileages = pd.to_numeric(candidates["mileage"], errors="coerce").to_numpy(dtype=float)
+    engines = pd.to_numeric(candidates["engine_size"], errors="coerce").to_numpy(dtype=float)
+
+    year_sim = np.where(
+        np.isnan(years) | np.isnan(q_year),
+        0.0,
+        np.maximum(0.0, 1.0 - np.abs(years - q_year) / YEAR_WINDOW),
+    )
+    mileage_sim = np.where(
+        np.isnan(mileages) | np.isnan(q_mileage),
+        0.0,
+        np.maximum(0.0, 1.0 - np.abs(mileages - q_mileage) / MILEAGE_WINDOW),
+    )
+
+    if np.isnan(q_engine):
+        engine_sim = np.full(len(candidates), 0.5)
+    else:
+        engine_sim = np.where(
+            np.isnan(engines),
+            0.5,
+            np.maximum(
+                0.0,
+                1.0 - np.abs(engines - q_engine) / max(abs(q_engine), 1.0),
+            ),
+        )
+
+    fuel_sim = _same_text(candidates["fuel_type"], query.get("fuel_type"))
+    trans_sim = _same_text(candidates["transmission"], query.get("transmission"))
+    body_sim = _same_text(candidates["body_type"], query.get("body_type"))
+
+    return (
+        W_YEAR * year_sim
+        + W_MILEAGE * mileage_sim
+        + W_ENGINE * engine_sim
+        + W_FUEL * fuel_sim
+        + W_TRANS * trans_sim
+        + W_BODY * body_sim
+    )
+
+
+def weighted_median(values, weights):
+    values = np.asarray(values, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+
+    valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+    values = values[valid]
+    weights = weights[valid]
+
+    if len(values) == 0:
+        return np.nan
+
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cutoff = weights.sum() / 2.0
+    return float(values[np.searchsorted(np.cumsum(weights), cutoff)])
+
+
+def find_comparable(query, market):
+    """Find comparable cars using TRAIN-ONLY market reference."""
+    brand = str(query.get("brand", ""))
+    model = str(query.get("model", ""))
+    sub = "" if pd.isna(query.get("sub_model")) else str(query.get("sub_model"))
+
+    market_brand = market["brand"].fillna("").astype(str)
+    market_model = market["model"].fillna("").astype(str)
+    market_sub = market["sub_model"].fillna("").astype(str)
+
+    exact = market[
+        (market_brand == brand)
+        & (market_model == model)
+        & (market_sub == sub)
+    ].copy()
+
+    if len(exact) > 0:
+        candidates = exact
+        match_level = "brand+model+sub_model"
+    else:
+        candidates = market[
+            (market_brand == brand) & (market_model == model)
+        ].copy()
+        match_level = "brand+model"
+
+    if len(candidates) == 0:
+        return {
+            "comparable_price": np.nan,
+            "comparable_count": 0,
+            "similarity": 0.0,
+            "match_level": "none",
+        }
+
+    q_year = safe_float(query.get("model_year"))
+    if np.isfinite(q_year):
+        years = pd.to_numeric(candidates["model_year"], errors="coerce")
+        filtered = candidates[years.between(q_year - YEAR_WINDOW, q_year + YEAR_WINDOW)]
+        if len(filtered) >= MIN_COMPS:
+            candidates = filtered
+
+    q_mileage = safe_float(query.get("mileage"))
+    if np.isfinite(q_mileage):
+        mileages = pd.to_numeric(candidates["mileage"], errors="coerce")
+        filtered = candidates[
+            mileages.between(max(0.0, q_mileage - MILEAGE_WINDOW),
+                             q_mileage + MILEAGE_WINDOW)
+        ]
+        if len(filtered) >= MIN_COMPS:
+            candidates = filtered
+
+    candidates["similarity"] = comparable_score(query, candidates)
+    candidates = candidates.sort_values("similarity", ascending=False).head(MAX_COMPS)
+
+    if len(candidates) < MIN_COMPS:
+        return {
+            "comparable_price": np.nan,
+            "comparable_count": int(len(candidates)),
+            "similarity": float(candidates["similarity"].mean()) if len(candidates) else 0.0,
+            "match_level": match_level,
+        }
+
+    prices = pd.to_numeric(candidates["price"], errors="coerce").to_numpy(dtype=float)
+    weights = np.clip(candidates["similarity"].to_numpy(dtype=float), 0.01, None)
+
+    return {
+        "comparable_price": weighted_median(prices, weights),
+        "comparable_count": int(len(candidates)),
+        "similarity": float(np.mean(weights)),
+        "match_level": match_level,
+    }
+
+
+def predict_all(input_df, rf_model, lr_model, market):
+    """Return RF, LR, comparable and Hybrid predictions for one input row."""
+    if len(input_df) != 1:
+        raise ValueError("predict_all expects exactly one input row")
+
+    input_df = input_df[FEATURES].copy()
+
+    rf_price = float(rf_model.predict(input_df)[0])
+    lr_price = float(lr_model.predict(input_df)[0])
+
+    query = input_df.iloc[0].to_dict()
+    comp = find_comparable(query, market)
+
+    if np.isfinite(comp["comparable_price"]) and comp["comparable_count"] >= MIN_COMPS:
+        hybrid_price = ML_WEIGHT * rf_price + COMP_WEIGHT * comp["comparable_price"]
+        hybrid_used = True
+    else:
+        hybrid_price = rf_price
+        hybrid_used = False
+
+    return {
+        "random_forest_price": rf_price,
+        "linear_regression_price": lr_price,
+        "comparable_price": (
+            float(comp["comparable_price"])
+            if np.isfinite(comp["comparable_price"])
+            else None
+        ),
+        "hybrid_price": float(hybrid_price),
+        "hybrid_used": hybrid_used,
+        "comparable_count": comp["comparable_count"],
+        "comparable_similarity": comp["similarity"],
+        "comparable_match_level": comp["match_level"],
+    }
+
+
+def format_thb(value):
+    if value is None or not np.isfinite(value):
+        return "N/A"
+    return f"{float(value):,.0f} บาท"
+
+
+def unique_options(df, column, **filters):
+    """Return sorted dropdown options after applying dependent filters."""
+    temp = df
+    for key, value in filters.items():
+        if value is None or value == "":
+            continue
+        temp = temp[temp[key].fillna("").astype(str) == str(value)]
+
+    values = temp[column].dropna().astype(str).str.strip()
+    values = values[values != ""].drop_duplicates().sort_values()
+    return values.tolist()
+
+
+# ============================================================
+# Prediction Guardrail
+# ============================================================
+
+def evaluate_prediction_reliability(
+    rf_price,
+    lr_price,
+    hybrid_price,
+    comparable_count=0,
+    similarity=None,
+):
+    """
+    ประเมินความน่าเชื่อถือของผลประมาณราคา
+
+    Reliability V2:
+    - Similarity:          75%
+    - Comparable coverage: 20%
+    - Model agreement:      5%
+
+    ฟังก์ชันนี้ไม่เปลี่ยนค่าที่โมเดลทำนาย
+    """
+
+    warnings = []
+
+    # --------------------------------------------------------
+    # 1. Similarity signal: 0..1
+    # --------------------------------------------------------
+
+    try:
+        similarity_signal = float(similarity)
+        similarity_signal = max(
+            0.0,
+            min(1.0, similarity_signal)
+        )
+    except Exception:
+        similarity_signal = 0.0
+
+    # --------------------------------------------------------
+    # 2. Comparable coverage signal: 0..1
+    #
+    # 0 comparable  -> 0.0
+    # 10+ comparable -> 1.0
+    # --------------------------------------------------------
+
+    try:
+        comparable_value = float(comparable_count)
+        comparable_value = max(
+            0.0,
+            min(10.0, comparable_value)
+        )
+        comparable_signal = comparable_value / 10.0
+    except Exception:
+        comparable_signal = 0.0
+
+    # --------------------------------------------------------
+    # 3. RF/LR model agreement signal: 0..1
+    # --------------------------------------------------------
+
+    try:
+        rf = float(rf_price)
+        lr = float(lr_price)
+
+        denominator = max(
+            abs(rf),
+            abs(lr),
+            1.0
+        )
+
+        disagreement = abs(rf - lr) / denominator
+
+        disagreement_capped = max(
+            0.0,
+            min(0.50, disagreement)
+        )
+
+        agreement_signal = (
+            1.0
+            - disagreement_capped / 0.50
+        )
+
+    except Exception:
+        disagreement = None
+        agreement_signal = 0.0
+
+    # --------------------------------------------------------
+    # 4. Reliability V2 score
+    # --------------------------------------------------------
+
+    score = 100.0 * (
+        0.75 * similarity_signal
+        + 0.20 * comparable_signal
+        + 0.05 * agreement_signal
+    )
+
+    score = max(
+        0.0,
+        min(100.0, score)
+    )
+
+    # --------------------------------------------------------
+    # 5. Reliability level
+    # --------------------------------------------------------
+
+    if score >= 80:
+        level = "สูง"
+    elif score >= 60:
+        level = "ปานกลาง"
+    else:
+        level = "ต่ำ"
+
+    # --------------------------------------------------------
+    # 6. User-facing warnings
+    #
+    # Warnings are informational only.
+    # They DO NOT modify the V2 score.
+    # --------------------------------------------------------
+
+    if comparable_signal < 0.20:
+        warnings.append(
+            "ข้อมูลรถ Comparable มีน้อยมาก จึงควรใช้ผลประมาณด้วยความระมัดระวัง"
+        )
+    elif comparable_signal < 0.50:
+        warnings.append(
+            "ข้อมูลรถ Comparable ยังมีจำนวนค่อนข้างน้อย"
+        )
+
+    if similarity_signal < 0.30:
+        warnings.append(
+            "ความคล้ายกับรถอ้างอิงอยู่ในระดับต่ำ"
+        )
+    elif similarity_signal < 0.40:
+        warnings.append(
+            "ความคล้ายกับรถอ้างอิงอยู่ในระดับค่อนข้างต่ำ"
+        )
+
+    if disagreement is not None:
+        if disagreement >= 0.50:
+            warnings.append(
+                "Random Forest และ Linear Regression ให้ผลต่างกันมาก"
+            )
+        elif disagreement >= 0.30:
+            warnings.append(
+                "Random Forest และ Linear Regression ให้ผลต่างกันค่อนข้างมาก"
+            )
+
+    if not warnings:
+        warnings.append(
+            "ไม่พบสัญญาณผิดปกติที่สำคัญจาก Guardrail"
+        )
+
+    return {
+        "score": score,
+        "level": level,
+        "warnings": warnings,
+        "model_disagreement": disagreement,
+    }
+

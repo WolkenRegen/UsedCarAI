@@ -101,3 +101,41 @@ The included data is based on One2Car Thailand listings. Source provenance is re
 - Vehicle age uses the reference year 2026 configured in the project.
 
 Only load saved `.joblib` models from sources you trust.
+
+## NVIDIA GPU acceleration
+
+The notebooks and app automatically enable RAPIDS when installed. This configuration targets Linux with an NVIDIA GPU and a CUDA 13-compatible driver (tested hardware: RTX 5060, 8 GB). Install into the same environment used by your notebook kernel:
+
+```bash
+source ML/bin/activate
+python -m pip install -r requirements-gpu.txt
+```
+
+**Restart the kernel before Run All.** GPU initialization must happen before importing pandas or scikit-learn. The first setup cell reports the selected backend.
+
+- `cudf.pandas` accelerates supported dataframe operations, including parts of cleaning and comparable selection; unsupported operations fall back to pandas.
+- `cuml.accel` accelerates supported model operations. Training uses dense one-hot output to avoid Random Forest's sparse-input CPU fallback.
+- GPU cross-validation runs one job at a time to avoid multiple training processes competing for VRAM.
+- Saved CPU pipelines are converted in memory for GPU inference; their files are not overwritten.
+- CPU and GPU model results can differ. Review validation/test metrics after training; existing saved CPU models are not automatically retrained by enabling the accelerator.
+- Plotting, the web interface, unsupported operations, and some model inspection remain on CPU. GPU acceleration does not guarantee faster single-row predictions.
+
+Use `USEDCAR_DEVICE=cuda` to require GPU setup, `auto` (default) to use GPU when available, or `cpu` to disable acceleration. Change this setting before launching Python or the notebook kernel:
+
+```bash
+USEDCAR_DEVICE=cuda python app/prediction_app.py
+USEDCAR_DEVICE=cpu python app/prediction_app.py
+```
+
+cuML logs show which model methods ran on GPU and explain CPU fallbacks. Set `CUML_ACCEL_LOG_LEVEL=debug` for more detail. Use `nvidia-smi` to inspect device memory and activity. Dense training matrices and forests require additional VRAM; reduce training sizes or use CPU mode if memory is insufficient.
+
+References: [cuML acceleration](https://docs.nvidia.com/cuml/latest/cuml-accel/), [supported operations](https://docs.nvidia.com/cuml/latest/cuml-accel/compatibility/), [cuDF pandas accelerator](https://docs.rapids.ai/api/cudf/stable/cudf_pandas/).
+
+### GPU smoke test
+
+```bash
+source ML/bin/activate
+python tests/gpu_smoke.py
+```
+
+This requires a working GPU installation. It trains small models on 512 training rows, checks inference and serialization, exercises cross-validation, and checks an application prediction. Temporary test models are removed afterwards; the production model files are not overwritten. Review the cuML logs for actual GPU dispatch and fallbacks.

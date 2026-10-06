@@ -6,6 +6,9 @@ Gradio interface for used-car listing-price estimation.
 from pathlib import Path
 import sys
 import os
+from acceleration import enable_gpu
+GPU_ENABLED = enable_gpu()
+
 import numpy as np
 import pandas as pd
 import gradio as gr

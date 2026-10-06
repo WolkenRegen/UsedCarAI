@@ -19,3 +19,6 @@ __pycache__/
 # Generated notebook outputs
 /dataset/results/
 /dataset/data/cleaned/
+
+# NVIDIA runtime logs
+cufile.log

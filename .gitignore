@@ -6,3 +6,16 @@ __pycache__/
 .usedcarai/
 .vscode/
 .env
+
+# Unrelated coursework and superseded dependency list
+/Lab*.ipynb
+/Test.ipynb
+/requirements-used-car.txt
+
+# Duplicate raw exports (canonical CSV is dataset/data/raw/)
+/dataset/data/thailand/raw/*.csv
+/dataset/data/thailand/raw/*.zip
+
+# Generated notebook outputs
+/dataset/results/
+/dataset/data/cleaned/

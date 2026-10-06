@@ -5,3 +5,4 @@ joblib==1.6.0
 gradio==6.29.1
 requests==2.34.2
 ipykernel==7.3.0
+matplotlib==3.11.2
